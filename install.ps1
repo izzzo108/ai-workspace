@@ -1,4 +1,4 @@
-﻿﻿﻿﻿<#
+<#
   ai-workspace installer (Windows PowerShell)
 
   Скачивает набор инструментов ai-workspace из GitHub и раскладывает его
