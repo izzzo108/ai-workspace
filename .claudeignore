@@ -1,0 +1,30 @@
+# Claude Code: exclude from automatic context (gitignore-style globs)
+# Explicit user request may still read a file; this is not a hard permissions block.
+
+# Archives
+*.zip
+*.rar
+*.7z
+*.tar
+*.gz
+*.bz2
+*.xz
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.cab
+*.iso
+
+# Video
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.wmv
+*.flv
+*.webm
+*.m4v
+*.mpeg
+*.mpg
+*.3gp
+*.ogv
