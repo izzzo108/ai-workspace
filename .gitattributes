@@ -1,0 +1,10 @@
+# Нормализация переносов строк в репозитории.
+# По умолчанию git сам решает, что текст, и хранит LF.
+* text=auto
+
+# Shell-скрипты ДОЛЖНЫ оставаться с LF — иначе curl | bash ломается на Linux/macOS.
+*.sh   text eol=lf
+
+# Windows-скрипты — CRLF.
+*.bat  text eol=crlf
+*.ps1  text eol=crlf
