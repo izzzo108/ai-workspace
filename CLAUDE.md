@@ -12,8 +12,8 @@ User docs: [getting-started.md](docs/harness/getting-started.md), [agents-new-pr
 
 ```
 CLAUDE.md            — single source of all rules (this file)
-agents/              — 18 local subagents
-.claude/skills/       — 7 workflow skills (auto-load by file type)
+agents/              — 20 local subagents
+.claude/skills/       — 9 workflow skills (auto-load by file type)
 .claude/commands/    — slash commands
 .claude/rules/       — language-specific rules (typescript-*.md, ...)
 docs/plans/          — saved feature plans from planner, with per-phase status
@@ -33,10 +33,11 @@ Planner saves every plan to `docs/plans/<date>-<slug>.md` with per-phase status 
 
 Markdown с YAML frontmatter: `name`, `description`, `tools`, `model`.
 
-## Skills (7)
+## Skills (9)
 
 | Skill | When |
 |-------|------|
+| coding-standards | Baseline naming/readability/immutability conventions |
 | python-patterns | Python code |
 | python-testing | pytest |
 | tdd-workflow | Test-first |
@@ -44,6 +45,7 @@ Markdown с YAML frontmatter: `name`, `description`, `tools`, `model`.
 | frontend-patterns | UI |
 | vite-patterns | Vite |
 | react-patterns | React |
+| search-first | Before writing custom code — check for existing tools/libraries first |
 
 When spawning subagents, pass relevant conventions from rules/skills into the prompt.
 
@@ -71,7 +73,9 @@ Located in local `agents/` (this repo):
 |-------|---------|-------------|
 | advisor | Agent navigator | Don't know which agent to call |
 | planner | Implementation planning | Complex features, refactoring |
+| planner-fable5 | Same as planner, on Fable 5 | Explicitly requested Fable5 planning |
 | architect | System design | Architectural decisions |
+| architect-fable5 | Same as architect, on Fable 5 | Explicitly requested Fable5 architecture |
 | code-architect | Feature blueprints | Design before implementation |
 | code-explorer | Codebase analysis | Old or unfamiliar projects |
 | build-error-resolver | Build/type errors | Project won't compile or run |
