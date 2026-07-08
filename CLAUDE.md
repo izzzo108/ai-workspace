@@ -8,6 +8,13 @@ Guidance for working in this repository.
 
 User docs: [getting-started.md](docs/harness/getting-started.md), [agents-new-project.md](docs/harness/agents-new-project.md).
 
+## Graphify (рекомендация, не принуждение)
+
+Если в проекте есть `graphify-out/graph.json`, graphify — **рекомендуемый первый шаг для вопросов
+по архитектуре и связям в коде** (`graphify query "<вопрос>"`, `graphify explain "<концепт>"`,
+`graphify path "<A>" "<B>"`). Это удобная ориентировка, а **не обязательный шаг перед каждым
+чтением файла**: для точечного чтения, правки или отладки конкретных строк идите в файлы напрямую.
+
 ## Architecture
 
 ```
