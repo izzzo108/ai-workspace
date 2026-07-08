@@ -4,7 +4,7 @@
 
 > Первый раз видите этот проект? Начните с **[user_readme.md](./user_readme.md)**.
 
-> **О происхождении:** агенты в `agents/` взяты для личного пользования и немного переделаны на основе [affaan-m/ecc](https://github.com/affaan-m/ecc).
+> **О происхождении:** агенты в `.claude/agents/` взяты для личного пользования и немного переделаны на основе [affaan-m/ecc](https://github.com/affaan-m/ecc).
 
 ## Быстрый старт
 
@@ -30,8 +30,7 @@
 ```
 ваш-проект/
 ├── CLAUDE.md         — единый источник правил (читает Claude Code)
-├── agents/           — агенты (копируете из болванки)
-├── .claude/          — skills + языковые rules + slash-команды
+├── .claude/          — agents + skills + языковые rules + slash-команды
 ├── docs/harness/     — гайды по работе с ИИ
 ├── docs/plans/       — планы фич от planner, со статусом фаз
 ├── src/              — ваш код (появится при работе)
@@ -55,7 +54,7 @@ curl -fsSL https://raw.githubusercontent.com/izzzo108/ai-workspace/main/install.
 irm https://raw.githubusercontent.com/izzzo108/ai-workspace/main/install.ps1 | iex
 ```
 
-Скрипт ставит `agents/`, `.claude/` (skills, rules, commands), `docs/`, `setup.bat`,
+Скрипт ставит `.claude/` (agents, skills, rules, commands), `docs/`, `setup.bat`,
 `user_readme.md`, а этот гайд кладёт рядом как `ai-workspace-README.md` (ваш `README.md`
 не трогается). Если у вас **уже есть** `.claude/settings.json`, `CLAUDE.md`,
 `.gitignore` и т.п. — установщик спросит, что делать:

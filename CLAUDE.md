@@ -12,7 +12,7 @@ User docs: [getting-started.md](docs/harness/getting-started.md), [agents-new-pr
 
 ```
 CLAUDE.md            — single source of all rules (this file)
-agents/              — 20 local subagents
+.claude/agents/       — 20 local subagents
 .claude/skills/       — 9 workflow skills (auto-load by file type)
 .claude/commands/    — slash commands
 .claude/rules/       — language-specific rules (typescript-*.md, ...)
@@ -67,7 +67,7 @@ User-facing workflow (Russian): [docs/harness/getting-started.md](docs/harness/g
 
 ### Available Agents
 
-Located in local `agents/` (this repo):
+Located in local `.claude/agents/` (this repo):
 
 | Agent | Purpose | When to Use |
 |-------|---------|-------------|

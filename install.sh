@@ -30,7 +30,7 @@ GIT="${AIWS_GIT:-}"                         # yes | no | "" (спросить)
 
 # Что всегда ставим (наши инструменты; при повторном запуске — обновление).
 OVERLAY=(
-  "agents"
+  ".claude/agents"
   ".claude/commands"
   ".claude/rules"
   ".claude/skills"

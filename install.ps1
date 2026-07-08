@@ -27,7 +27,7 @@ $Mode   = if ($env:AIWS_MODE)   { $env:AIWS_MODE }   else { '' }  # merge|skip|o
 $Git    = if ($env:AIWS_GIT)    { $env:AIWS_GIT }    else { '' }  # yes|no|'' (спросить)
 
 $Overlay = @(
-  'agents', '.claude\commands', '.claude\rules', '.claude\skills',
+  '.claude\agents', '.claude\commands', '.claude\rules', '.claude\skills',
   'docs', 'setup.bat', 'user_readme.md'
 )
 $Protected = @(
