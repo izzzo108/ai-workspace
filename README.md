@@ -24,6 +24,7 @@
 | Новый проект | [agents-new-project.md](./docs/harness/agents-new-project.md) |
 | Старый проект | [agents-existing-project.md](./docs/harness/agents-existing-project.md) |
 | Все агенты | [agents-cheatsheet.md](./docs/harness/agents-cheatsheet.md) |
+| Скрипты план-ревью (Claude + Codex) | [scripts.md](./docs/harness/scripts.md) |
 
 ## Структура (одна папка на проект)
 
@@ -33,6 +34,7 @@
 ├── .claude/          — agents + skills + языковые rules + slash-команды
 ├── docs/harness/     — гайды по работе с ИИ
 ├── docs/plans/       — планы фич от planner, со статусом фаз
+├── scripts/          — Claude+Codex план-ревью, см. docs/harness/scripts.md
 ├── src/              — ваш код (появится при работе)
 └── README.md         — как запустить программу (позже, через @docs-writer)
 ```
