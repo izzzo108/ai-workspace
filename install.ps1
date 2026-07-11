@@ -1,4 +1,4 @@
-<#
+﻿<#
   ai-workspace installer (Windows PowerShell)
 
   Скачивает набор инструментов ai-workspace из GitHub и раскладывает его
@@ -10,6 +10,10 @@
   Режим обработки конфликтов можно задать заранее (без вопросов) через env:
     $env:AIWS_MODE = 'merge'      # merge (по умолчанию) | skip | overwrite
     irm .../install.ps1 | iex
+
+  Что установить (по умолчанию — весь набор; иначе спросит):
+    $env:AIWS_SCOPE = 'scripts'   # поставить ТОЛЬКО папку scripts\
+    $env:AIWS_SCOPE = 'all'       # весь набор без вопроса
 
   Инициализация git в проекте (по умолчанию — спросит):
     $env:AIWS_GIT = 'yes'   # сразу git init  |  'no' — не предлагать
@@ -25,10 +29,11 @@ $Repo   = if ($env:AIWS_REPO)   { $env:AIWS_REPO }   else { 'izzzo108/ai-workspa
 $Branch = if ($env:AIWS_BRANCH) { $env:AIWS_BRANCH } else { 'main' }
 $Mode   = if ($env:AIWS_MODE)   { $env:AIWS_MODE }   else { '' }  # merge|skip|overwrite|'' (спросить)
 $Git    = if ($env:AIWS_GIT)    { $env:AIWS_GIT }    else { '' }  # yes|no|'' (спросить)
+$Scope  = if ($env:AIWS_SCOPE)  { $env:AIWS_SCOPE }  else { '' }  # all|scripts|'' (спросить)
 
 $Overlay = @(
   '.claude\agents', '.claude\commands', '.claude\rules', '.claude\skills',
-  'docs', 'setup.bat', 'user_readme.md'
+  'docs', 'scripts', 'setup.bat', 'user_readme.md'
 )
 $Protected = @(
   '.claude\settings.json', 'CLAUDE.md', '.gitignore',
@@ -69,6 +74,16 @@ try {
   if (-not $src) { Fail 'распаковка не удалась' }
   $Src = $src.FullName
 
+  # ---------------------------------------------------------------- scope (что ставим)
+  if (-not $Scope) {
+    Say '  Что установить?'
+    Say '    a - весь набор ai-workspace (агенты, скиллы, доки, scripts)  [по умолчанию]'
+    Say '    s - только папку scripts (план-ревью и мозговой штурм)'
+    $sc = (Ask '  Выбор [a/s]: ').Trim().ToLower()
+    $Scope = if ($sc -eq 's') { 'scripts' } else { 'all' }
+    Say ''
+  }
+
   # ---------------------------------------------------------------- conflict mode
   function Test-Conflict {
     foreach ($f in $Protected) {
@@ -77,7 +92,7 @@ try {
     return $false
   }
 
-  if (-not $Mode) {
+  if (($Scope -ne 'scripts') -and (-not $Mode)) {
     if (Test-Conflict) {
       Say "  У вас уже есть часть конфигурации (например .claude\settings.json)."
       Say "    m - смержить (добавить наши ключи, не трогая ваши)  [по умолчанию]"
@@ -110,6 +125,25 @@ try {
   function Backup ($rel) {
     $d = Join-Path $Dest $rel
     if (Test-Path $d) { Copy-Item $d "$d.bak" -Recurse -Force; Say "    backup -> $rel.bak" }
+  }
+
+  # Установка папки scripts\ со СВОИМ запросом на замену, если она уже есть.
+  function Install-Scripts {
+    $s = Join-Path $Src 'scripts'; $d = Join-Path $Dest 'scripts'
+    if (-not (Test-Path $s)) { Warn 'в источнике нет scripts/'; return }
+    if (-not (Test-Path $d)) { Copy-Item $s $d -Recurse -Force; Ok 'scripts\ (новый)'; return }
+    $decision = ''
+    if     ($Mode -eq 'skip')      { $decision = 'no' }
+    elseif ($Mode -eq 'overwrite') { $decision = 'yes' }
+    if (-not $decision) {
+      $ans = (Ask '  Папка scripts\ уже есть. Заменить нашими (старую сохраним в scripts.bak)? [y/N]: ').Trim().ToLower()
+      $decision = if ($ans -in 'y','yes','д','да') { 'yes' } else { 'no' }
+    }
+    if ($decision -eq 'yes') {
+      Backup 'scripts'; Remove-Item $d -Recurse -Force; Copy-Item $s $d -Recurse -Force; Ok 'scripts\ (заменён)'
+    } else {
+      Warn 'scripts\ - оставлен ваш'
+    }
   }
 
   # Рекурсивное слияние: массивы — union, объекты — рекурсивно,
@@ -149,6 +183,16 @@ try {
     }
     return $added
   }
+
+  # ---------------------------------------------------------------- scripts-only
+  if ($Scope -eq 'scripts') {
+    Install-Scripts
+    Say ''
+    Write-Host '  Готово. Установлена только папка scripts\.' -ForegroundColor Green
+    Say '  Как пользоваться - docs\harness\brainstorm-guide.md и scripts.md'
+    Say ''
+  }
+  else {
 
   # ---------------------------------------------------------------- install overlay
   foreach ($item in $Overlay) { Copy-Overlay $item }
@@ -222,6 +266,7 @@ try {
   Write-Host "  Готово. Инструменты ai-workspace установлены в текущий проект." -ForegroundColor Green
   Say "  Начните с user_readme.md - правила в CLAUDE.md"
   Say ''
+  }
 }
 finally {
   Remove-Item -Path $tmp -Recurse -Force -ErrorAction SilentlyContinue

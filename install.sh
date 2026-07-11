@@ -13,6 +13,10 @@
 #   ... | bash -s -- --skip         # не трогать существующие файлы
 #   ... | bash -s -- --overwrite    # перезаписать (с бэкапом .bak)
 #
+# Что установить (по умолчанию — весь набор; иначе спросит интерактивно):
+#   ... | bash -s -- --scripts-only # поставить ТОЛЬКО папку scripts/
+#   ... | bash -s -- --all          # весь набор без вопроса
+#
 # Инициализация git в проекте (по умолчанию — спросит):
 #   ... | bash -s -- --git        # сразу git init
 #   ... | bash -s -- --no-git     # не предлагать git init
@@ -27,6 +31,7 @@ REPO="${AIWS_REPO:-izzzo108/ai-workspace}"   # владелец репозито
 BRANCH="${AIWS_BRANCH:-main}"
 MODE="${AIWS_MODE:-}"                      # merge | skip | overwrite | "" (спросить)
 GIT="${AIWS_GIT:-}"                         # yes | no | "" (спросить)
+SCOPE="${AIWS_SCOPE:-}"                     # all | scripts | "" (спросить, по умолчанию all)
 
 # Что всегда ставим (наши инструменты; при повторном запуске — обновление).
 OVERLAY=(
@@ -35,6 +40,7 @@ OVERLAY=(
   ".claude/rules"
   ".claude/skills"
   "docs"
+  "scripts"
   "setup.bat"
   "user_readme.md"
 )
@@ -76,6 +82,8 @@ while [ $# -gt 0 ]; do
     --merge)     MODE="merge" ;;
     --skip)      MODE="skip" ;;
     --overwrite) MODE="overwrite" ;;
+    --scripts-only) SCOPE="scripts" ;;
+    --all)          SCOPE="all" ;;
     --git)       GIT="yes" ;;
     --no-git)    GIT="no" ;;
     --repo)      REPO="${2:?}"; shift ;;
@@ -116,6 +124,20 @@ fi
 SRC="$TMP/$(ls "$TMP" | head -n1)"
 [ -d "$SRC" ] || { err "распаковка не удалась"; exit 1; }
 
+# ---------------------------------------------------------------- scope (что ставим)
+if [ -z "$SCOPE" ]; then
+  if [ -r /dev/tty ]; then
+    say "  Что установить?"
+    say "    ${C_B}a${C_0} — весь набор ai-workspace (агенты, скиллы, доки, ${C_B}scripts${C_0}…)  ${C_D}[по умолчанию]${C_0}"
+    say "    ${C_B}s${C_0} — только папку ${C_B}scripts/${C_0} (план-ревью и мозговой штурм)"
+    a="$(ask "  Выбор [a/s]: ")"
+    case "$a" in s|S) SCOPE="scripts" ;; *) SCOPE="all" ;; esac
+    say ""
+  else
+    SCOPE="all"
+  fi
+fi
+
 # ---------------------------------------------------------------- conflict mode
 have_conflict() {
   local f
@@ -125,7 +147,7 @@ have_conflict() {
   return 1
 }
 
-if [ -z "$MODE" ]; then
+if [ "$SCOPE" != "scripts" ] && [ -z "$MODE" ]; then
   if have_conflict; then
     say "  У вас уже есть часть конфигурации (например ${C_B}.claude/settings.json${C_0})."
     say "    ${C_B}m${C_0} — смержить (добавить наши ключи, не трогая ваши)  ${C_D}[по умолчанию]${C_0}"
@@ -163,6 +185,25 @@ copy_overlay() {
 
 backup() { [ -e "./$1" ] && cp -R "./$1" "./$1.bak" && say "    ${C_D}бэкап → $1.bak${C_0}"; }
 
+# Установка папки scripts/ со СВОИМ запросом на замену, если она уже есть.
+install_scripts() {
+  [ -e "$SRC/scripts" ] || { warn "в источнике нет scripts/"; return 0; }
+  if [ ! -e "./scripts" ]; then
+    cp -R "$SRC/scripts" "./scripts"; ok "scripts/ ${C_D}(новый)${C_0}"; return 0
+  fi
+  local decision=""
+  case "$MODE" in skip) decision="no" ;; overwrite) decision="yes" ;; esac
+  if [ -z "$decision" ]; then
+    local a; a="$(ask "  Папка ${C_B}scripts/${C_0} уже есть. Заменить нашими (старую сохраним в scripts.bak)? [y/N]: ")"
+    case "$a" in y|Y|д|Д|да|Да) decision="yes" ;; *) decision="no" ;; esac
+  fi
+  if [ "$decision" = "yes" ]; then
+    backup "scripts"; rm -rf "./scripts"; cp -R "$SRC/scripts" "./scripts"; ok "scripts/ ${C_D}(заменён)${C_0}"
+  else
+    warn "scripts/ — оставлен ваш"
+  fi
+}
+
 # Слияние JSON (settings.json): объединяем массивы (union), словари — рекурсивно,
 # скаляры при конфликте оставляем ПОЛЬЗОВАТЕЛЬСКИЕ.
 merge_json() {
@@ -199,6 +240,15 @@ append_missing_lines() {
   done < "$ours"
   return $((1 - added))
 }
+
+# ---------------------------------------------------------------- scripts-only
+if [ "$SCOPE" = "scripts" ]; then
+  install_scripts
+  say ""
+  say "  ${C_G}${C_B}Готово.${C_0} Установлена только папка ${C_B}scripts/${C_0}."
+  say "  ${C_D}Как пользоваться — docs/harness/brainstorm-guide.md и scripts.md${C_0}"
+  exit 0
+fi
 
 # ---------------------------------------------------------------- install overlay
 for item in "${OVERLAY[@]}"; do copy_overlay "$item"; done
