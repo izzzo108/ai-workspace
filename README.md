@@ -56,9 +56,9 @@ curl -fsSL https://raw.githubusercontent.com/izzzo108/ai-workspace/main/install.
 irm https://raw.githubusercontent.com/izzzo108/ai-workspace/main/install.ps1 | iex
 ```
 
-Скрипт ставит `.claude/` (agents, skills, rules, commands), `docs/`, `setup.bat`,
-`user_readme.md`, а этот гайд кладёт рядом как `ai-workspace-README.md` (ваш `README.md`
-не трогается). Если у вас **уже есть** `.claude/settings.json`, `CLAUDE.md`,
+Скрипт ставит `.claude/` (agents, skills, rules, commands), `docs/`, `scripts/`
+(план-ревью и мозговой штурм), `setup.bat`, `user_readme.md`, а этот гайд кладёт рядом
+как `ai-workspace-README.md` (ваш `README.md` не трогается). Если у вас **уже есть** `.claude/settings.json`, `CLAUDE.md`,
 `.gitignore` и т.п. — установщик спросит, что делать:
 
 | Режим | Что делает |
@@ -74,6 +74,18 @@ curl -fsSL .../install.sh | bash -s -- --skip        # или --merge / --overwr
 ```powershell
 $env:AIWS_MODE='skip'; irm .../install.ps1 | iex     # или 'merge' / 'overwrite'
 ```
+
+**Поставить только скрипты.** Если из всего набора нужны лишь `scripts/` (план-ревью и
+мозговой штурм) — установщик в начале предложит выбор «весь набор / только scripts», либо
+задайте сразу:
+```bash
+curl -fsSL .../install.sh | bash -s -- --scripts-only
+```
+```powershell
+$env:AIWS_SCOPE='scripts'; irm .../install.ps1 | iex
+```
+Если папка `scripts/` уже существует, установщик спросит: заменить её нашей версией
+(старую сохранит в `scripts.bak`) или оставить вашу.
 
 В конце установщик предложит **инициализировать git** в проекте (`git init`) — если вы согласитесь и Git установлен, создастся папка `.git/`. Если Git не найден, скрипт подскажет установить его: [git-scm.com/install/windows](https://git-scm.com/install/windows) (версия 2.54 и выше). Пропустить/форсировать: флаг `--git`/`--no-git` (bash) или `$env:AIWS_GIT='yes'|'no'` (PowerShell).
 
