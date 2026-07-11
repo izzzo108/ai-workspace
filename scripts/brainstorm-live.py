@@ -18,7 +18,8 @@
 #      (с простыми SVG-визуализациями, где уместно).
 #
 # Что сохраняется — в папку docs/brainstorm/<ваше-имя>_ДД_ММ_ГГГГ/ :
-#   - result.html          — итог всегда как красивая страница (открыть двойным кликом);
+#   - result.html          — итог всегда как красивая страница; по завершении
+#                            открывается автоматически в браузере;
 #   - conversation.html    — статичная копия всего диалога (открыть можно позже);
 #   - transcript.md        — задача + все раунды + финал.
 #
@@ -279,11 +280,12 @@ if result:
     page = ac.extract_html(result) or ac.md_to_html(result, TOPIC[:80])
     result_file = SESSION_DIR / "result.html"
     result_file.write_text(page, encoding="utf-8")
-    ac.log("arbiter", "✅ Готова HTML-страница с результатом — откройте файл "
-                      "result.html в папке сессии (двойной клик).")
+    ac.log("arbiter", "✅ Готова HTML-страница с результатом — открываю result.html "
+                      "(файл лежит в папке сессии).")
     record_turn(f"Финал — {ac.slot_desc(SLOT_ARBITER)}",
                 "Итоговая HTML-страница сохранена в `result.html`.")
     ac.verify_file(result_file)
+    ac.open_in_browser(result_file)   # автоматически открываем готовую страницу
 else:
     ac.log("error", "Подводящий итоги не вернул результат — файл результата не создан.")
 

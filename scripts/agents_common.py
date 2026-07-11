@@ -342,6 +342,16 @@ def snapshot_events():
         return list(events)
 
 
+def open_in_browser(path):
+    """Открыть локальный файл (например готовый result.html) в браузере — вызывается
+    по завершении, чтобы результат сразу показался пользователю."""
+    try:
+        import pathlib
+        webbrowser.open(pathlib.Path(path).resolve().as_uri())
+    except Exception:
+        pass
+
+
 # ===========================================================================
 # Запуск хода: единый интерфейс для Claude / Codex / GLM
 # ===========================================================================

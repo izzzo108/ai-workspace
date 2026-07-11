@@ -152,6 +152,7 @@ ac.log("system", f"Готово. Файлы в: {PLAN_DIR}")
 # Статичная копия всего хода — открыть можно позже, без запущенного сервера.
 CONVO_HTML.write_text(ac.build_static_html(ac.snapshot_events(), PAGE_TITLE), encoding="utf-8")
 ac.verify_file(CONVO_HTML)
+ac.open_in_browser(CONVO_HTML)   # автоматически открываем готовую страницу
 
 print("Готово. Файлы в:")
 print(f"  {PLAN_DIR}")
