@@ -25,6 +25,8 @@ import os
 import re
 import time
 import json
+import html
+import tempfile
 import threading
 import webbrowser
 
@@ -54,23 +56,88 @@ CLAUDE_MODELS = [
     ("fable", "fable — Claude Fable 5 (самая мощная)"),
 ]
 
-CODEX_MODELS = [
-    ("gpt-5.6-sol", "gpt-5.6-sol — Codex 5.6 (новая, по умолчанию)"),
-    ("gpt-5.5", "gpt-5.5 — предыдущая основная"),
-    ("gpt-5.4-mini", "gpt-5.4-mini — быстрее и дешевле"),
-    ("gpt-5.3-codex", "gpt-5.3-codex — максимальная глубина кода"),
+# --- Claude: уровни размышления (флаг --effort) ---
+CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+CLAUDE_DEFAULT_EFFORT = "medium"
+
+# --- Codex: реальный список моделей ПОД ПОДПИСКУ читаем из кэша самого CLI ---
+CODEX_MODELS_CACHE = os.path.join(os.path.expanduser("~"), ".codex", "models_cache.json")
+
+# Запасной список, если кэш недоступен. Актуально на 2026-07: семейство GPT-5.6
+# Sol/Terra/Luna + предыдущие. Кортеж: (slug, подпись, default_effort, [efforts]).
+_CODEX_FALLBACK = [
+    ("gpt-5.6-sol", "GPT-5.6 Sol — флагман (сложное кодирование и ресёрч)", "medium",
+     ["low", "medium", "high", "xhigh", "max", "ultra"]),
+    ("gpt-5.6-terra", "GPT-5.6 Terra — баланс для повседневной работы", "medium",
+     ["low", "medium", "high", "xhigh", "max", "ultra"]),
+    ("gpt-5.6-luna", "GPT-5.6 Luna — быстрая и дешёвая", "medium",
+     ["low", "medium", "high", "xhigh", "max"]),
+    ("gpt-5.5", "GPT-5.5 — предыдущий флагман", "medium",
+     ["low", "medium", "high", "xhigh"]),
+    ("gpt-5.4", "GPT-5.4 — крепкая повседневная", "medium",
+     ["low", "medium", "high", "xhigh"]),
+    ("gpt-5.4-mini", "GPT-5.4 Mini — самая быстрая и дешёвая", "medium",
+     ["low", "medium", "high", "xhigh"]),
 ]
+
+
+def load_codex_models():
+    """Список моделей Codex: надёжный актуальный набор (_CODEX_FALLBACK) + всё новое, что
+    появится в кэше codex CLI (~/.codex/models_cache.json). Порядок: сначала известные,
+    потом добор из кэша. Кэш codex обновляет на лету, поэтому известные модели (в т.ч.
+    семейство GPT-5.6) всегда остаются на месте — динамика их не выкинет, только дополнит.
+    Элемент: (slug, подпись, default_effort, [efforts])."""
+    result = [t for t in _CODEX_FALLBACK]
+    have = {t[0] for t in result}
+    try:
+        data = json.load(open(CODEX_MODELS_CACHE, encoding="utf-8"))
+        for m in data.get("models", []):
+            slug = m.get("slug")
+            if not slug or slug in have or m.get("visibility") != "list":
+                continue
+            efforts = [lvl["effort"] for lvl in m.get("supported_reasoning_levels", []) if lvl.get("effort")]
+            desc = (m.get("description") or "").rstrip(".")
+            label = f"{m.get('display_name') or slug}" + (f" — {desc}" if desc else "")
+            result.append((slug, label, m.get("default_reasoning_level") or "medium",
+                           efforts or ["low", "medium", "high"]))
+            have.add(slug)
+    except Exception:
+        pass
+    return result
+
 
 # GLM через opencode: значение — полный id провайдер/модель, как ждёт `opencode run -m`.
 GLM_MODELS = [
-    ("zai-coding-plan/glm-5.2", "glm-5.2 — основная (по умолчанию)"),
-    ("zai-coding-plan/glm-4.7", "glm-4.7 — предыдущая"),
+    ("zai-coding-plan/glm-5.2", "glm-5.2 — основная (уровни размышления high/max)"),
+    ("zai-coding-plan/glm-5.1", "glm-5.1"),
+    ("zai-coding-plan/glm-4.7", "glm-4.7"),
     ("zai-coding-plan/glm-5-turbo", "glm-5-turbo — быстрее"),
     ("zai-coding-plan/glm-4.5-air", "glm-4.5-air — легче и дешевле"),
 ]
 
+# --- GLM: тип «варианта размышления» модели читаем из каталога opencode ---
+OPENCODE_MODELS_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "opencode", "models.json")
+
+
+def glm_variant_spec(model_id):
+    """Тип варианта размышления GLM-модели из каталога opencode (поле reasoning_options):
+    {'type':'effort','values':[...]} (напр. glm-5.2 → high/max) или {'type':'toggle'}
+    или None. model_id — 'zai-coding-plan/glm-5.2'."""
+    try:
+        provider, mid = model_id.split("/", 1)
+        data = json.load(open(OPENCODE_MODELS_CACHE, encoding="utf-8"))
+        prov = data.get(provider) or {}
+        models = prov.get("models") if isinstance(prov.get("models"), dict) else prov
+        m = models.get(mid) or {}
+        opts = m.get("reasoning_options") or m.get("variants")
+        if isinstance(opts, list) and opts:
+            return opts[0]
+    except Exception:
+        pass
+    return None
+
+
 ENGINE_TITLE = {"claude": "Claude", "codex": "Codex", "glm": "GLM"}
-ENGINE_MODELS = {"claude": CLAUDE_MODELS, "codex": CODEX_MODELS, "glm": GLM_MODELS}
 
 
 def glm_available():
@@ -119,12 +186,42 @@ def ask_line(prompt, required=False, preset=None):
         print("Это обязательный пункт — введите значение.")
 
 
+def _choose_effort(prompt, efforts, default):
+    """Меню глубины размышления: default идёт первым и помечен."""
+    ordered = ([default] if default in efforts else []) + [e for e in efforts if e != default]
+    opts = [(e, f"{e}{' — по умолчанию' if e == default else ''}") for e in ordered]
+    return choose(prompt, opts)
+
+
+def _choose_glm_effort(model_id):
+    """Глубина для GLM = provider-specific вариант, в том виде как его даёт модель:
+    effort-модели (glm-5.2) — high/max; toggle-модели — размышление вкл по умолчанию
+    (градаций нет). Возврат '' означает «не передавать --variant»."""
+    spec = glm_variant_spec(model_id)
+    if spec and spec.get("type") == "effort" and spec.get("values"):
+        opts = [("", "обычная глубина (по умолчанию)")] + [(v, v) for v in spec["values"]]
+        return choose(f"Глубина размышления GLM ({model_id.split('/')[-1]}):", opts)
+    return ""  # toggle или неизвестно — градаций нет
+
+
 def choose_slot(role_label):
-    """Двухшаговый выбор: движок (Claude/Codex/GLM — GLM если доступен), затем модель."""
+    """Выбор движка → модели → глубины размышления для роли (в том виде, как её
+    предоставляет каждый движок: Claude --effort, Codex model_reasoning_effort,
+    GLM --variant). GLM показывается, только если доступен opencode."""
     print(f"\n=== {role_label} ===")
     engine = choose("Какой движок в этой роли?", engine_options())
-    model = choose(f"Выберите модель {ENGINE_TITLE[engine]}:", ENGINE_MODELS[engine])
-    slot = {"engine": engine, "model": model, "role": role_label}
+    if engine == "codex":
+        models = load_codex_models()
+        model = choose("Выберите модель Codex:", [(s, d) for s, d, _, _ in models])
+        _, _, default_eff, efforts = next(m for m in models if m[0] == model)
+        effort = _choose_effort(f"Глубина размышления Codex ({model}):", efforts, default_eff)
+    elif engine == "claude":
+        model = choose("Выберите модель Claude:", CLAUDE_MODELS)
+        effort = _choose_effort("Глубина размышления Claude:", CLAUDE_EFFORTS, CLAUDE_DEFAULT_EFFORT)
+    else:  # glm
+        model = choose("Выберите модель GLM:", GLM_MODELS)
+        effort = _choose_glm_effort(model)
+    slot = {"engine": engine, "model": model, "effort": effort, "role": role_label}
     print(f"→ {role_label}: {slot_desc(slot)}")
     return slot
 
@@ -132,15 +229,78 @@ def choose_slot(role_label):
 def slot_desc(slot):
     m = slot["model"]
     short = m.split("/")[-1] if slot["engine"] == "glm" else m
-    return f"{ENGINE_TITLE[slot['engine']]}/{short}"
+    eff = slot.get("effort")
+    return f"{ENGINE_TITLE[slot['engine']]}/{short}" + (f" ({eff})" if eff else "")
 
 
 def slugify(text):
     """Безопасное имя папки: убираем недопустимые символы, пробелы -> _. Кириллица ок."""
-    s = text.strip().lower()
+    s = text.strip()
     s = re.sub(r'[<>:"/\\|?*\n\r\t]+', " ", s)
     s = re.sub(r"\s+", "_", s).strip("_")
-    return s[:40] or "session"
+    return s[:60] or "session"
+
+
+def extract_html(text):
+    """Достаёт чистый HTML-документ из ответа модели: отбрасывает возможную преамбулу,
+    markdown-ограждение ```html и всё вне <html>…</html>. Если документа нет — None."""
+    if not text:
+        return None
+    t = text.strip()
+    low = t.lower()
+    start = low.find("<!doctype")
+    if start == -1:
+        start = low.find("<html")
+    end = low.rfind("</html>")
+    if start != -1 and end != -1 and end > start:
+        return t[start:end + len("</html>")]
+    return None
+
+
+def md_to_html(md, title="Результат"):
+    """Простой рендер markdown в самостоятельную читаемую HTML-страницу (заголовки,
+    списки, жирный, абзацы) — на случай, когда просили HTML, а модель вернула markdown.
+    Так не-программист всё равно получает нормальную страницу, а не текстовый файл."""
+    def inline(t):
+        t = html.escape(t)
+        t = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", t)
+        t = re.sub(r"`([^`]+)`", r"<code>\1</code>", t)
+        return t
+
+    body = []
+    in_ul = [False]
+
+    def close_ul():
+        if in_ul[0]:
+            body.append("</ul>")
+            in_ul[0] = False
+
+    for raw in (md or "").strip().split("\n"):
+        line = raw.strip()
+        hm = re.match(r"^(#{1,6})\s+(.*)$", line)
+        if hm:
+            close_ul()
+            lvl = min(len(hm.group(1)), 4)
+            body.append(f"<h{lvl}>{inline(hm.group(2))}</h{lvl}>")
+        elif re.match(r"^[-*]\s+", line):
+            if not in_ul[0]:
+                body.append("<ul>")
+                in_ul[0] = True
+            body.append(f"<li>{inline(line[2:].strip())}</li>")
+        elif not line:
+            close_ul()
+        else:
+            close_ul()
+            body.append(f"<p>{inline(line)}</p>")
+    close_ul()
+    return (
+        '<!DOCTYPE html>\n<html lang="ru"><head><meta charset="utf-8">'
+        f"<title>{html.escape(title)}</title>"
+        "<style>body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;"
+        "max-width:820px;margin:40px auto;padding:0 20px;line-height:1.6;color:#1b1b1b}"
+        "h1,h2,h3,h4{line-height:1.25}code{background:#f0f0f0;padding:1px 5px;border-radius:4px}"
+        "li{margin:4px 0}</style></head><body>\n" + "\n".join(body) + "\n</body></html>"
+    )
 
 
 # ===========================================================================
@@ -223,10 +383,12 @@ def _kill_after(proc, seconds):
     return t
 
 
-def run_claude_turn(slot, source, prompt, title):
+def run_claude_turn(slot, source, prompt, title, quiet=False):
     """claude -p ... stream-json: стримим текст живьём, tool_use/служебное подавляем."""
     cmd = [resolve_cli("claude"), "-p", prompt, "--model", slot["model"],
            "--output-format", "stream-json", "--verbose"]
+    if slot.get("effort"):
+        cmd += ["--effort", slot["effort"]]
     collected, result_text = [], None
     try:
         proc = subprocess.Popen(
@@ -252,7 +414,8 @@ def run_claude_turn(slot, source, prompt, title):
                     if block.get("type") == "text":
                         txt = (block.get("text") or "").strip()
                         if txt:
-                            log(source, txt)
+                            if not quiet:
+                                log(source, txt)
                             collected.append(txt)
             elif t == "result":
                 r = (obj.get("result") or "").strip()
@@ -291,11 +454,23 @@ def clean_codex_output(raw):
     return result if result else raw.strip()
 
 
-def run_codex_turn(slot, source, prompt, title):
-    """codex exec отвечает текстом. Флаг --dangerously-bypass-approvals-and-sandbox
-    обязателен: на Windows без него codex падает на старте. Здесь безопасно — только чтение."""
+def _safe_remove(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def run_codex_turn(slot, source, prompt, title, quiet=False):
+    """codex exec. Флаг --dangerously-bypass-approvals-and-sandbox обязателен: на Windows
+    без него codex падает на старте. Чистый финальный ответ берём через -o <файл>
+    (codex пишет туда ТОЛЬКО последнее сообщение, без эха промпта в stdout)."""
+    fd, tmp = tempfile.mkstemp(prefix="codex_last_", suffix=".txt")
+    os.close(fd)
     cmd = [resolve_cli("codex"), "exec", prompt, "--model", slot["model"],
-           "--dangerously-bypass-approvals-and-sandbox"]
+           "--dangerously-bypass-approvals-and-sandbox", "-o", tmp]
+    if slot.get("effort"):
+        cmd += ["-c", f"model_reasoning_effort={slot['effort']}"]
     try:
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -303,6 +478,7 @@ def run_codex_turn(slot, source, prompt, title):
         )
     except Exception as e:
         log("error", f"{title}: не удалось запустить codex — {e}")
+        _safe_remove(tmp)
         return ""
     try:
         out, _ = proc.communicate(timeout=PER_TURN_TIMEOUT)
@@ -312,18 +488,30 @@ def run_codex_turn(slot, source, prompt, title):
         log("error", f"{title}: codex превысил таймаут {PER_TURN_TIMEOUT} сек")
     if proc.returncode not in (0, None):
         log("error", f"{title}: codex завершился с кодом {proc.returncode}")
-    text = clean_codex_output(out)
+    # чистый финальный ответ — из файла -o; запасной вариант — очищенный stdout
+    text = ""
+    try:
+        if os.path.isfile(tmp):
+            text = open(tmp, encoding="utf-8", errors="replace").read().strip()
+    except Exception:
+        pass
+    _safe_remove(tmp)
+    if not text:
+        text = clean_codex_output(out)
     if not text:
         log("error", f"{title}: codex не вернул текст")
         return ""
-    log(source, text)
+    if not quiet:
+        log(source, text)
     return text
 
 
-def run_glm_turn(slot, source, prompt, title):
+def run_glm_turn(slot, source, prompt, title, quiet=False):
     """GLM через `opencode run -m provider/model --format json`. Ответ модели лежит
     в событиях type:"text" -> part.text. Копим и показываем одним чистым блоком."""
     cmd = [resolve_cli("opencode"), "run", prompt, "-m", slot["model"], "--format", "json"]
+    if slot.get("effort"):
+        cmd += ["--variant", slot["effort"]]
     parts = []
     try:
         proc = subprocess.Popen(
@@ -356,20 +544,23 @@ def run_glm_turn(slot, source, prompt, title):
     if not text:
         log("error", f"{title}: GLM (opencode) не вернул текст")
         return ""
-    log(source, text)
+    if not quiet:
+        log(source, text)
     return text
 
 
 ENGINE_RUNNERS = {"claude": run_claude_turn, "codex": run_codex_turn, "glm": run_glm_turn}
 
 
-def run_agent_turn(slot, source, title, prompt):
+def run_agent_turn(slot, source, title, prompt, quiet=False):
     """source — CSS-класс окраски блока: 'claude' / 'codex' / 'glm' / 'arbiter'.
-    Открывает новый сворачиваемый блок (== title ==) и возвращает чистый текст ответа."""
+    Открывает новый сворачиваемый блок (== title ==) и возвращает чистый текст ответа.
+    quiet=True — не выводить сам ответ в живой поток (напр. когда это сырой HTML-код,
+    который не нужен человеку; вместо него показывают дружелюбную заметку)."""
     status["current"] = title
     status["started_at"] = time.time()
     log("system", f"== {title} ==")
-    return ENGINE_RUNNERS[slot["engine"]](slot, source, prompt, title)
+    return ENGINE_RUNNERS[slot["engine"]](slot, source, prompt, title, quiet)
 
 
 # ===========================================================================

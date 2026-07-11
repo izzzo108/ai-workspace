@@ -49,35 +49,24 @@ ac.enable_utf8_console()
 
 TOPIC_PRESET = " ".join(sys.argv[1:]).strip() or None
 
-# (key, подпись, обязательный)
-BRIEF_POINTS = [
-    ("topic", "Задача / тема (о чём думаем)", True),
-    ("output", "Какой финальный результат хочешь (план / список идей / HTML-страница / сравнение …)", True),
-    ("context", "Контекст и ограничения (стек, платформа, бюджет, сроки)", False),
-    ("known", "Что уже известно / что пробовали", False),
-    ("success", "Критерии успеха / на какие вопросы нужен ответ", False),
-    ("out_of_scope", "Что НЕ рассматриваем (вне рамок)", False),
-]
-
 print("=" * 66)
-print("МОЗГОВОЙ ШТУРМ (Claude / Codex / GLM) — заполните бриф")
-print("Enter = пропустить необязательный пункт")
+print("МОЗГОВОЙ ШТУРМ (Claude / Codex / GLM)")
 print("=" * 66)
 
-brief = {}
-brief_lines = []
-for key, label, required in BRIEF_POINTS:
-    preset = TOPIC_PRESET if key == "topic" else None
-    if preset:
-        print(f"{label}: {preset}   (из аргумента запуска)")
-    value = ac.ask_line(f"{label}: ", required=required, preset=preset)
-    if value:
-        brief[key] = value
-        brief_lines.append((label, value))
+# Просьба: сама задача + что хотите получить на выходе (в одном описании).
+TOPIC = ac.ask_line(
+    "Что обдумать? Опишите задачу и что хотите получить на выходе\n"
+    "(план / список идей / HTML-страница / сравнение …):\n> ",
+    required=True, preset=TOPIC_PRESET,
+)
+if TOPIC_PRESET:
+    print(f"Задача: {TOPIC}")
 
-TOPIC = brief.get("topic", "(без темы)")
-DESIRED_OUTPUT = brief.get("output", "").strip()
-BRIEF_MD = "## БРИФ\n" + "\n".join(f"- **{label}:** {v}" for label, v in brief_lines)
+# Единственное уточнение — как назвать папку с результатами.
+FOLDER_NAME = ac.ask_line("Как назвать папку с результатами? ", required=True)
+
+WANTS_HTML = "html" in TOPIC.lower()
+BRIEF_MD = f"## Задача\n{TOPIC}"
 
 # ---------------------------------------------------------------------------
 # 2. Три слота
@@ -112,11 +101,18 @@ ROUNDS = ask_rounds()
 # ---------------------------------------------------------------------------
 
 now = datetime.datetime.now()
-DATE = now.strftime("%d.%m.%Y")
+DATE = now.strftime("%d_%m_%Y")        # ДД_ММ_ГГГГ — для имени папки
+DATE_HUMAN = now.strftime("%d.%m.%Y")
 TIME = now.strftime("%H.%M")
 
-TOPIC_DIR = PROJECT_ROOT / "docs" / "brainstorm" / ac.slugify(TOPIC)
-SESSION_DIR = TOPIC_DIR / f"{DATE}_{TIME}"
+# Папка = <имя, которое вы задали>_ДД_ММ_ГГГГ (в docs/brainstorm/).
+_base = f"{ac.slugify(FOLDER_NAME)}_{DATE}"
+BRAINSTORM_ROOT = PROJECT_ROOT / "docs" / "brainstorm"
+SESSION_DIR = BRAINSTORM_ROOT / _base
+_n = 2
+while SESSION_DIR.exists():             # не перезаписываем прошлый прогон с тем же именем
+    SESSION_DIR = BRAINSTORM_ROOT / f"{_base}_{_n}"
+    _n += 1
 SESSION_DIR.mkdir(parents=True, exist_ok=True)
 
 TRANSCRIPT_FILE = SESSION_DIR / "transcript.md"
@@ -139,7 +135,7 @@ def write_transcript_header():
         f"- Подводящий итоги: {ac.slot_desc(SLOT_ARBITER)}\n"
         f"\nРаундов: {ROUNDS}"
     )
-    header = f"# Мозговой штурм — {DATE} {TIME}\n\n{BRIEF_MD}\n\n{participants}\n"
+    header = f"# Мозговой штурм — {DATE_HUMAN} {TIME}\n\n{BRIEF_MD}\n\n{participants}\n"
     TRANSCRIPT_FILE.write_text(header, encoding="utf-8")
     ac.verify_file(TRANSCRIPT_FILE)
 
@@ -203,27 +199,25 @@ def critic_prompt(r):
 
 
 def arbiter_prompt():
+    if WANTS_HTML:
+        fmt = (
+            "Пользователь попросил HTML-страницу. Верни ТОЛЬКО валидный HTML-документ: "
+            "начни СРАЗУ с <!DOCTYPE html> и заверши </html>. Никакого текста, пояснений "
+            "или markdown-ограждений ``` до или после HTML. Оформи аккуратно и понятно для "
+            "обычного человека: заголовки, списки, лёгкое оформление, читаемые шрифты."
+        )
+    else:
+        fmt = (
+            "Верни результат в том виде, который просили в задаче (план / список идей / "
+            "текст) — в markdown, простым понятным человеку языком, без технического жаргона."
+        )
     return (
-        f"Заверши мозговой штурм и подведи итоги. Бриф:\n\n{BRIEF_MD}\n\n"
+        f"Заверши мозговой штурм и подведи итоги.\n\n{BRIEF_MD}\n\n"
         f"Вся переписка участников:\n\n{transcript_inline(max_chars=40000)}\n\n"
-        f"Твоя роль — подвести итоги и выдать ФИНАЛЬНЫЙ результат ровно в том виде, "
-        f"который запросили в брифе (поле «Какой финальный результат хочешь»):\n"
-        f"  → {DESIRED_OUTPUT or 'структурированный итог обсуждения'}\n\n"
-        f"Собери лучшие идеи из обсуждения, отбрось слабые. "
-        f"Если просили HTML-страницу — верни ПОЛНЫЙ валидный HTML-документ "
-        f"(начиная с <!DOCTYPE html>, с минимальным читаемым оформлением). "
-        f"Если просили план / список / текст — верни markdown. "
-        f"Если уместно для формата, в начале кратко отметь, какие идеи принял, а какие отклонил. "
-        f"Верни ТОЛЬКО финальный результат, без рассказа о процессе. "
-        f"Отвечай на русском. Не используй инструменты — только сам результат в ответе."
+        f"Твоя роль — собрать лучшие идеи из обсуждения (слабые отбросить) и выдать "
+        f"финальный результат для НЕ-программиста. {fmt} "
+        f"Не рассказывай о процессе. Отвечай на русском. Не используй инструменты."
     )
-
-
-def looks_html(text, desired):
-    if "html" in (desired or "").lower():
-        return True
-    head = text.lstrip()[:200].lower()
-    return head.startswith("<!doctype") or head.startswith("<html")
 
 
 # ===========================================================================
@@ -233,7 +227,7 @@ def looks_html(text, desired):
 ac.serve(PORT, PAGE_TITLE)
 
 ac.log("system", f"Задача: {TOPIC}")
-ac.log("system", f"Хочу на выходе: {DESIRED_OUTPUT or '(не указано)'}")
+ac.log("system", f"Папка результатов: {SESSION_DIR.name}")
 ac.log("system", f"Начинающий: {ac.slot_desc(SLOT_PROPOSER)} | "
                  f"Отвечающий: {ac.slot_desc(SLOT_CRITIC)} | "
                  f"Итоги: {ac.slot_desc(SLOT_ARBITER)}")
@@ -260,24 +254,29 @@ for r in range(1, ROUNDS + 1):
         record_turn(f"Раунд {r} — Критикует: {ac.slot_desc(SLOT_CRITIC)}", reply2)
 
 # --- Подведение итогов + финальный результат в запрошенном виде -------------
+# quiet=WANTS_HTML — сырой HTML-код в живой поток не выводим (человеку он не нужен),
+# показываем дружелюбную заметку и сохраняем чистую страницу в файл.
 result = ac.run_agent_turn(
     SLOT_ARBITER, "arbiter",
     f"Итоги — {ac.slot_desc(SLOT_ARBITER)} готовит финальный результат",
-    arbiter_prompt(),
+    arbiter_prompt(), quiet=WANTS_HTML,
 )
 if result:
-    record_turn(f"Финал — {ac.slot_desc(SLOT_ARBITER)}", result)
-    if looks_html(result, DESIRED_OUTPUT):
+    if WANTS_HTML:
+        page = ac.extract_html(result) or ac.md_to_html(result, TOPIC[:80])
         result_file = SESSION_DIR / "result.html"
-        result_file.write_text(result, encoding="utf-8")
+        result_file.write_text(page, encoding="utf-8")
+        ac.log("arbiter", "✅ Готова HTML-страница с результатом — откройте файл "
+                          "result.html в папке сессии (двойной клик).")
+        record_turn(f"Финал — {ac.slot_desc(SLOT_ARBITER)}",
+                    "Итоговая HTML-страница сохранена в `result.html`.")
     else:
         result_file = SESSION_DIR / "result.md"
         result_file.write_text(
-            f"# Финальный результат — {DATE} {TIME}\n\n"
-            f"**Задача:** {TOPIC}\n\n"
-            f"**Запрошенный вид:** {DESIRED_OUTPUT or '(не указано)'}\n\n---\n\n{result}\n",
+            f"# Результат — {DATE_HUMAN} {TIME}\n\n**Задача:** {TOPIC}\n\n---\n\n{result}\n",
             encoding="utf-8",
         )
+        record_turn(f"Финал — {ac.slot_desc(SLOT_ARBITER)}", result)
     ac.verify_file(result_file)
 else:
     ac.log("error", "Подводящий итоги не вернул результат — файл результата не создан.")
