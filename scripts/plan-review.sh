@@ -1,140 +1,168 @@
 #!/bin/bash
-# Запуск: ./scripts/plan-review.sh "описание задачи"
-# Требует: установленные и залогиненные claude и codex CLI.
-# Файл лежит в scripts/, скрипт сам переходит в корень проекта.
+# ============================================================================
+# Запуск ЧЕРЕЗ Git Bash:
+#     ./scripts/plan-review.sh "текст задачи"
+#     (или: bash scripts/plan-review.sh "текст задачи")
 #
-# Перед первым запуском один раз выполните:
-#   chmod +x scripts/plan-review.sh
-# Это даёт файлу право "исполняемый" — без этого Git Bash/Linux
-# откажется его запускать (ошибка "Permission denied").
-# Само содержимое файла при этом не меняется, разрешение нужно один раз.
+# План-ревью двумя LLM на выбор (Claude / Codex / GLM), вывод прямо в терминал:
+#   начинающий составляет план -> отвечающий критикует -> начинающий дорабатывает.
+#
+# Для каждой роли выбираешь движок и модель. GLM берётся через opencode
+# (провайдер zai-coding-plan) и показывается в выборе, ТОЛЬКО если opencode установлен.
+#
+# Контекст между шагами передаётся моделям прямо в промпте, а все файлы пишет сам
+# скрипт — так в любом слоте одинаково работают все три движка.
+#
+# Требует: CLI claude, codex и (опц.) opencode в PATH — те, что доступны в Git Bash.
+# Есть также live-версия с просмотром в браузере: scripts/plan-review-live.py
+# ============================================================================
+
+set -o pipefail
+
+# UTF-8 в консоли Windows (Git Bash), иначе кириллица может испортиться.
+chcp.com 65001 > /dev/null 2>&1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT" || exit 1
 
-# Переключаем кодировку консоли Windows на UTF-8. Без этого кириллица от
-# claude/codex может испортиться (кракозябры) при сохранении в файлы.
-chcp.com 65001 > /dev/null 2>&1
-
 TASK="$1"
-
 if [ -z "$TASK" ]; then
-  echo "Использование: ./scripts/plan-review.sh \"текст задачи\""
+  echo "Использование (через Git Bash): ./scripts/plan-review.sh \"текст задачи\""
   exit 1
 fi
 
-# --- Выбор модели Claude ---
-echo "Выберите модель Claude:"
-select choice in \
-  "sonnet — Claude Sonnet 5 (по умолчанию)" \
-  "opus — Claude Opus 4.8 (мощнее, медленнее)" \
-  "haiku — Claude Haiku 4.5 (быстрее и дешевле)" \
-  "fable — Claude Fable 5 (самая мощная)"; do
-  case $REPLY in
-    1) CLAUDE_MODEL="sonnet"; break ;;
-    2) CLAUDE_MODEL="opus"; break ;;
-    3) CLAUDE_MODEL="haiku"; break ;;
-    4) CLAUDE_MODEL="fable"; break ;;
-    *) echo "Введите число от 1 до 4" ;;
+# GLM доступен только если установлен opencode.
+GLM_AVAILABLE=0
+if command -v opencode > /dev/null 2>&1; then GLM_AVAILABLE=1; fi
+
+# --- Выбор движка и модели для роли: заполняет SLOT_ENGINE и SLOT_MODEL ------
+SLOT_ENGINE=""
+SLOT_MODEL=""
+choose_slot() {
+  local role="$1"
+  echo ""
+  echo "=== $role ==="
+  echo "Выберите движок:"
+  echo "  1) Claude"
+  echo "  2) Codex"
+  local emax=2
+  if [ "$GLM_AVAILABLE" = "1" ]; then echo "  3) GLM (через opencode)"; emax=3; fi
+  while true; do
+    read -r -p "Число (1-$emax): " n
+    case "$n" in
+      1) SLOT_ENGINE="claude"; break ;;
+      2) SLOT_ENGINE="codex"; break ;;
+      3) if [ "$GLM_AVAILABLE" = "1" ]; then SLOT_ENGINE="glm"; break; fi ;;
+    esac
+    echo "Введите число от 1 до $emax"
+  done
+
+  echo "Выберите модель:"
+  if [ "$SLOT_ENGINE" = "claude" ]; then
+    echo "  1) sonnet   2) opus   3) haiku   4) fable"
+    while true; do read -r -p "Число (1-4): " m; case "$m" in
+      1) SLOT_MODEL="sonnet"; break ;; 2) SLOT_MODEL="opus"; break ;;
+      3) SLOT_MODEL="haiku"; break ;; 4) SLOT_MODEL="fable"; break ;;
+      *) echo "Введите 1-4" ;; esac; done
+  elif [ "$SLOT_ENGINE" = "codex" ]; then
+    echo "  1) gpt-5.6-sol (Codex 5.6)   2) gpt-5.5   3) gpt-5.4-mini   4) gpt-5.3-codex"
+    while true; do read -r -p "Число (1-4): " m; case "$m" in
+      1) SLOT_MODEL="gpt-5.6-sol"; break ;; 2) SLOT_MODEL="gpt-5.5"; break ;;
+      3) SLOT_MODEL="gpt-5.4-mini"; break ;; 4) SLOT_MODEL="gpt-5.3-codex"; break ;;
+      *) echo "Введите 1-4" ;; esac; done
+  else
+    echo "  1) glm-5.2   2) glm-4.7   3) glm-5-turbo   4) glm-4.5-air"
+    while true; do read -r -p "Число (1-4): " m; case "$m" in
+      1) SLOT_MODEL="zai-coding-plan/glm-5.2"; break ;;
+      2) SLOT_MODEL="zai-coding-plan/glm-4.7"; break ;;
+      3) SLOT_MODEL="zai-coding-plan/glm-5-turbo"; break ;;
+      4) SLOT_MODEL="zai-coding-plan/glm-4.5-air"; break ;;
+      *) echo "Введите 1-4" ;; esac; done
+  fi
+}
+
+# --- Запуск одного хода: печатает чистый текст ответа в stdout ---------------
+# У всех трёх CLI осмысленный ответ идёт в stdout, а служебный вывод — в stderr,
+# поэтому stderr глушим (2>/dev/null) и забираем только текст ответа.
+run_engine() {
+  local engine="$1" model="$2" prompt="$3"
+  case "$engine" in
+    claude) claude -p "$prompt" --model "$model" 2>/dev/null ;;
+    codex)  codex exec "$prompt" --model "$model" --dangerously-bypass-approvals-and-sandbox 2>/dev/null ;;
+    glm)    opencode run "$prompt" -m "$model" --format default 2>/dev/null ;;
   esac
-done
-echo "Выбрана модель Claude: $CLAUDE_MODEL"
+}
 
-# --- Выбор модели Codex ---
-echo "Выберите модель Codex:"
-select choice in \
-  "gpt-5.5 — основная (по умолчанию)" \
-  "gpt-5.4-mini — быстрее и дешевле" \
-  "gpt-5.3-codex — максимальная глубина кода"; do
-  case $REPLY in
-    1) CODEX_MODEL="gpt-5.5"; break ;;
-    2) CODEX_MODEL="gpt-5.4-mini"; break ;;
-    3) CODEX_MODEL="gpt-5.3-codex"; break ;;
-    *) echo "Введите число от 1 до 3" ;;
+# --- Короткая подпись роли для вывода: "Claude/opus", "GLM/glm-5.2" ----------
+label() {
+  local e="$1" m="$2" short="$2"
+  [ "$e" = "glm" ] && short="${m##*/}"
+  case "$e" in
+    claude) echo "Claude/$short" ;;
+    codex)  echo "Codex/$short" ;;
+    glm)    echo "GLM/$short" ;;
   esac
-done
-echo "Выбрана модель Codex: $CODEX_MODEL"
+}
 
-# Дата в формате DD.MM.YYYY и время в формате HH.MM (часы.минуты)
-DATE=$(date +'%d.%m.%Y')
-TIME=$(date +'%H.%M')
+verify_file() {
+  if [ -f "$1" ]; then
+    printf '\033[92m💾 Файл сохранён: %s\033[0m\n' "$1"
+  else
+    printf '\033[91m⚠ Файл НЕ найден: %s\033[0m\n' "$1"
+  fi
+}
 
-PLAN_DIR="docs/Plans"
-mkdir -p "$PLAN_DIR"
+# --- Выбор слотов ----------------------------------------------------------
+choose_slot "Начинающий (составляет и дорабатывает план)"
+P_ENGINE="$SLOT_ENGINE"; P_MODEL="$SLOT_MODEL"
+choose_slot "Отвечающий (критикует план)"
+C_ENGINE="$SLOT_ENGINE"; C_MODEL="$SLOT_MODEL"
 
+# --- Файлы вывода ----------------------------------------------------------
+DATE=$(date +'%d.%m.%Y'); TIME=$(date +'%H.%M')
+PLAN_DIR="$PROJECT_ROOT/docs/Plans"; mkdir -p "$PLAN_DIR"
 PLAN_FILE="$PLAN_DIR/${DATE}_${TIME}_plan.md"
 CRITIQUE_FILE="$PLAN_DIR/${DATE}_${TIME}_critique.md"
 FINAL_FILE="$PLAN_DIR/${DATE}_${TIME}_plan-final.md"
 
-# Печать короткой тезисной сводки фиолетовым цветом (доп. трата токенов, но видно суть)
-print_summary() {
-  local label="$1"
-  local text="$2"
-  printf "\033[38;5;141m[ИТОГ %s]\n%s\033[0m\n" "$label" "$text"
-}
+C_MD='Отвечай на русском, в markdown, по делу. Не используй инструменты — только текстовый ответ.'
 
-# Проверка, что файл реально появился на диске (а не просто "модель сказала, что сохранила")
-verify_file() {
-  local path="$1"
-  if [ -f "$path" ]; then
-    printf "\033[92m💾 Файл сохранён: %s\033[0m\n" "$path"
-    return 0
-  else
-    printf "\033[91m⚠ Файл НЕ найден: %s\033[0m\n" "$path"
-    return 1
-  fi
-}
+# --- Шаг 1: план -----------------------------------------------------------
+echo ""
+printf '\033[1m== Шаг 1: %s составляет план ==\033[0m\n' "$(label "$P_ENGINE" "$P_MODEL")"
+PLAN=$(run_engine "$P_ENGINE" "$P_MODEL" "Составь подробный, реалистичный план по задаче: $TASK. Разбей на фазы и конкретные шаги, укажи зависимости, риски и критерии готовности. Верни только сам план. $C_MD")
+printf '%s\n' "$PLAN"
+printf '%s\n' "$PLAN" > "$PLAN_FILE"
+verify_file "$PLAN_FILE"
 
-echo "== Шаг 1: Claude ($CLAUDE_MODEL) составляет план =="
-claude -p "Используй planner.md как инструкцию. Составь план по задаче: $TASK. Сохрани план в файл $PLAN_FILE." \
-  --model "$CLAUDE_MODEL" > /dev/null 2>&1
+# --- Шаг 2: критика --------------------------------------------------------
+echo ""
+printf '\033[1m== Шаг 2: %s критикует ==\033[0m\n' "$(label "$C_ENGINE" "$C_MODEL")"
+CRITIQUE=$(run_engine "$C_ENGINE" "$C_MODEL" "Вот план по задаче «$TASK»:
 
-if verify_file "$PLAN_FILE"; then
-  SUMMARY1=$(claude -p "Прочитай $PLAN_FILE. Одним списком из 3-5 пунктов коротко перечисли, что ты запланировал (главные фазы и решения). Только список, без вступления и заключения." --model "$CLAUDE_MODEL")
-  print_summary "CLAUDE" "$SUMMARY1"
-else
-  echo "Шаг 2 и 3 пропущены: план не был создан."
-  exit 1
-fi
+$PLAN
 
-# --- Шаг 2: Codex критикует план ---
-# Важно: НЕ просим Codex сохранять файл сам — он часто работает в "песочнице"
-# без прав на запись в проект, и файл может тихо не появиться. Вместо этого
-# забираем его ответ текстом и сохраняем critique.md сами.
-# --dangerously-bypass-approvals-and-sandbox: на Windows у Codex CLI известный
-# баг — его "хелпер" песочницы не запускается (orchestrator_helper_launch_failed),
-# и без этого флага codex exec падает на старте, ничего не читая. Здесь это
-# безопасно — Codex только читает файл и отвечает текстом, ничего не выполняет.
-echo "== Шаг 2: Codex ($CODEX_MODEL) критикует план =="
-CODEX_CRITIQUE=$(codex exec "Прочитай файл $PLAN_FILE. Дай критику: найди слабые места, риски, недостающие шаги, нестыковки. Выведи только список замечаний текстом прямо в ответе — сохранять файлы не нужно, об этом позаботится скрипт." --model "$CODEX_MODEL" --dangerously-bypass-approvals-and-sandbox)
+Дай конструктивную критику: слабые места, риски, недостающие шаги, нестыковки, более сильные альтернативы. Верни только список замечаний. $C_MD")
+printf '%s\n' "$CRITIQUE"
+printf '%s\n' "$CRITIQUE" > "$CRITIQUE_FILE"
+verify_file "$CRITIQUE_FILE"
 
-CRITIQUE_OK=1
-if [ -n "$CODEX_CRITIQUE" ]; then
-  printf '%s\n' "$CODEX_CRITIQUE" > "$CRITIQUE_FILE"
-  if verify_file "$CRITIQUE_FILE"; then
-    CRITIQUE_OK=0
-    SUMMARY2=$(codex exec "Вот твоя критика плана:\n\n$CODEX_CRITIQUE\n\nОдним списком из 3-5 пунктов коротко перечисли главные замечания. Только список, без вступления." --model "$CODEX_MODEL" --dangerously-bypass-approvals-and-sandbox)
-    print_summary "CODEX" "$SUMMARY2"
-  fi
-else
-  echo "⚠ Codex не вернул текст критики — файл не создан."
-fi
+# --- Шаг 3: доработка ------------------------------------------------------
+echo ""
+printf '\033[1m== Шаг 3: %s дорабатывает план ==\033[0m\n' "$(label "$P_ENGINE" "$P_MODEL")"
+FINAL=$(run_engine "$P_ENGINE" "$P_MODEL" "Твой план по задаче «$TASK»:
 
-# --- Шаг 3: Claude учитывает критику ---
-echo "== Шаг 3: Claude ($CLAUDE_MODEL) учитывает критику и дорабатывает план =="
-if [ "$CRITIQUE_OK" -eq 0 ]; then
-  FINAL_PROMPT="Прочитай $PLAN_FILE (твой план) и $CRITIQUE_FILE (критика от другого ИИ, Codex). Реши, какие замечания принять, а какие отклонить — и почему. Дополни и допиши план с учётом принятых замечаний. Сохрани финальную версию в $FINAL_FILE."
-else
-  FINAL_PROMPT="Критика от Codex недоступна (шаг критики не удался). Прочитай $PLAN_FILE и просто сохрани его копию как финальную версию в $FINAL_FILE, без изменений."
-fi
+$PLAN
 
-claude -p "$FINAL_PROMPT" \
-  --model "$CLAUDE_MODEL" > /dev/null 2>&1
+Критика от другого ИИ:
 
-if verify_file "$FINAL_FILE" && [ "$CRITIQUE_OK" -eq 0 ]; then
-  SUMMARY3=$(claude -p "Прочитай $FINAL_FILE и $CRITIQUE_FILE. Одним списком из 3-5 пунктов коротко перечисли: что из критики Codex ты принял, а что отклонил и почему. Только список, без вступления." --model "$CLAUDE_MODEL")
-  print_summary "CLAUDE" "$SUMMARY3"
-fi
+$CRITIQUE
 
-echo "Готово. Итог: $FINAL_FILE"
+Реши, какие замечания принять, а какие отклонить — и почему. Выдай доработанный финальный план с учётом принятого. $C_MD")
+printf '%s\n' "$FINAL"
+printf '%s\n' "$FINAL" > "$FINAL_FILE"
+verify_file "$FINAL_FILE"
+
+echo ""
+echo "Готово. Файлы в: $PLAN_DIR"
