@@ -35,12 +35,19 @@ INLINE_TRANSCRIPT_LIMIT = 24000  # макс. символов контекста
 
 
 def enable_utf8_console():
-    """UTF-8 в консоли Windows — иначе кириллица от CLI может испортиться в файлах.
-    Вызывать из родительского скрипта (он запускается через Git Bash)."""
+    """UTF-8 для вывода Python. КРИТИЧНО на Windows: без этого print() с символами
+    '→', '•', '…' и т.п. падает с UnicodeEncodeError на консоли cp1251/cp866, и скрипт
+    умирает ещё на выборе моделей — до самого штурма (нет никакого результата).
+    errors='replace' — страховка, чтобы вывод не ронял программу ни при какой кодировке."""
     if os.name == "nt":
         try:
             subprocess.run("chcp 65001", shell=True,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
 
