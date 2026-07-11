@@ -46,7 +46,6 @@ PROTECTED=(
   ".gitignore"
   ".claudeignore"
   "requirements.txt"
-  ".python-version"
 )
 
 # ---------------------------------------------------------------- ui helpers
@@ -244,9 +243,6 @@ for rel in "${PROTECTED[@]}"; do
       # центральный файл — не трогаем чужой, кладём наш рядом на ревью
       cp "$SRC/$rel" "./CLAUDE.aiworkspace.md"
       warn "CLAUDE.md существует — наш сохранён как CLAUDE.aiworkspace.md (сравните вручную)"
-      ;;
-    ".python-version")
-      warn ".python-version — оставлен ваш"
       ;;
     *)
       warn "$rel — пропущен"

@@ -32,7 +32,7 @@ $Overlay = @(
 )
 $Protected = @(
   '.claude\settings.json', 'CLAUDE.md', '.gitignore',
-  '.claudeignore', 'requirements.txt', '.python-version'
+  '.claudeignore', 'requirements.txt'
 )
 
 # ---------------------------------------------------------------- ui helpers
@@ -188,9 +188,6 @@ try {
     elseif ($rel -eq 'CLAUDE.md') {
       Copy-Item $s (Join-Path $Dest 'CLAUDE.aiworkspace.md') -Force
       Warn 'CLAUDE.md существует - наш сохранён как CLAUDE.aiworkspace.md (сравните вручную)'
-    }
-    elseif ($rel -eq '.python-version') {
-      Warn '.python-version - оставлен ваш'
     }
     else {
       Warn "$rel - пропущен"
