@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 #
 # agents_common.py — общий модуль для наших live-скриптов (brainstorm-live.py,
-# plan-review-live.py). Здесь живёт всё, что у них одинаково:
+# plan-review-live.py, consilium-live.py). Здесь живёт всё, что у них одинаково:
 #   - выбор движка и модели (Claude / Codex / GLM), где GLM показывается только
 #     если установлен opencode;
 #   - запуск одного «хода» любого движка с получением чистого текста;
